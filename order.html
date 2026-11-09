@@ -41,6 +41,21 @@
   const p = new URLSearchParams(location.hash.slice(1));
   const q = new URLSearchParams(location.search);
 
+  if (q.get("request_token") && (q.get("action") || "login") === "login" && q.get("type") !== "basket") {
+    // Daily Kite login (read-only live prices for MB). Show the one-day code to send to MB.
+    const tok = q.get("request_token");
+    if (!/^[A-Za-z0-9]{6,64}$/.test(tok)) { app.innerHTML = '<p class="err">Unexpected login response.</p>'; return; }
+    history.replaceState(null, "", location.pathname);   // keep the code out of the address bar and history
+    app.innerHTML = '<h1>Kite login done</h1><p>Send this to MB Master within a few minutes (it works once):</p>' +
+      '<div class="order"><p style="font-family:monospace;font-size:17px;word-break:break-all"><b>KITE LOGIN ' + esc(tok) + '</b></p></div>' +
+      '<button id="cp">Copy</button><p class="note">This code only lets MB read prices and your order book for today. ' +
+      'Zerodha does not accept orders sent from the Grok computer, so it cannot place trades.</p>';
+    document.getElementById("cp").addEventListener("click", function () {
+      navigator.clipboard.writeText("KITE LOGIN " + tok).then(() => { this.textContent = "Copied"; });
+    });
+    return;
+  }
+
   if (q.get("status") || q.get("type") === "basket") {   // Zerodha redirects back here after the basket
     const ok = (q.get("status") || "").toLowerCase() === "success";
     app.innerHTML = ok
