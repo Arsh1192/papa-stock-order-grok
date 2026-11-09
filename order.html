@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>PAPA STOCK order</title>
+<style>
+  :root { --bg:#ffffff; --fg:#14171a; --muted:#5b6670; --line:#e3e7eb; --ok:#0b7a43; --warn:#a15c00; --btn:#1d4ed8; --btnfg:#fff; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#111417; --fg:#e8ecef; --muted:#9aa5ae; --line:#2a3036; --ok:#3ccf8e; --warn:#f0a94a; --btn:#3b82f6; } }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  main { max-width:520px; margin:0 auto; padding:20px 16px 40px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .id { color:var(--muted); font-size:14px; margin-bottom:16px; }
+  table { width:100%; border-collapse:collapse; margin:8px 0 16px; }
+  td { padding:8px 4px; border-bottom:1px solid var(--line); vertical-align:top; }
+  td:first-child { color:var(--muted); width:42%; }
+  .order { border:1px solid var(--line); border-radius:10px; padding:4px 12px; margin-bottom:12px; }
+  button { width:100%; padding:14px; font-size:17px; font-weight:600; border:0; border-radius:10px; background:var(--btn); color:var(--btnfg); }
+  button:disabled { opacity:.5; }
+  .note { color:var(--muted); font-size:14px; margin-top:14px; }
+  .err { color:var(--warn); font-weight:600; }
+  .done { color:var(--ok); font-weight:600; font-size:18px; }
+</style>
+</head>
+<body>
+<main>
+  <div id="app"><p>Loading order…</p></div>
+</main>
+<script>
+/*
+  One-tap order page for the PAPA STOCK board.
+  MB (Grok) sends a link:  order.html#k=<kite api_key>&id=<ticket id>&exp=<unix seconds>&b=<base64url JSON basket>
+  Everything after # stays in your browser (never sent to any server, including this one).
+  "Open in Kite" posts the basket to Zerodha's own order page, where you log in and confirm.
+  Zerodha places the order from your own session; this page never sees your login or places anything itself.
+*/
+(function () {
+  const app = document.getElementById("app");
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  const p = new URLSearchParams(location.hash.slice(1));
+  const q = new URLSearchParams(location.search);
+
+  if (q.get("status") || q.get("type") === "basket") {   // Zerodha redirects back here after the basket
+    const ok = (q.get("status") || "").toLowerCase() === "success";
+    app.innerHTML = ok
+      ? '<p class="done">Sent to Zerodha.</p><p>Check the order in Kite, then reply in MB Master: <b>PLACED &lt;ticket id&gt;</b>.</p>'
+      : '<p class="err">Zerodha did not confirm the order.</p><p>Check Kite → Orders, then tell MB what you see.</p>';
+    return;
+  }
+
+  function fail(msg) { app.innerHTML = '<h1>Order link problem</h1><p class="err">' + esc(msg) + '</p><p class="note">Ask MB for a fresh link. Nothing was sent to Zerodha.</p>'; }
+
+  const key = p.get("k"), id = p.get("id"), exp = Number(p.get("exp") || 0), b = p.get("b");
+  if (!key || !id || !b) return fail("This link is incomplete.");
+  if (!/^[A-Za-z0-9]{6,40}$/.test(key)) return fail("Bad Kite app key in the link.");
+  if (!exp || Date.now() / 1000 > exp) return fail("This link has expired.");
+
+  let orders;
+  try {
+    const json = decodeURIComponent(escape(atob(b.replace(/-/g, "+").replace(/_/g, "/"))));
+    orders = JSON.parse(json);
+  } catch (e) { return fail("Could not read the order in this link."); }
+  if (!Array.isArray(orders) || orders.length < 1 || orders.length > 2) return fail("Expected 1–2 orders.");
+
+  // Same hard rules as the board: NSE cash only, CNC, LIMIT / SL only, no MIS, no market orders.
+  for (const o of orders) {
+    if (o.exchange !== "NSE") return fail("Only NSE orders are allowed.");
+    if (o.product !== "CNC") return fail("Only CNC (cash, no margin) orders are allowed.");
+    if (!["LIMIT", "SL"].includes(o.order_type)) return fail("Only LIMIT or SL orders are allowed.");
+    if (!["BUY", "SELL"].includes(o.transaction_type)) return fail("Bad side.");
+    if (!(o.quantity >= 1 && Number.isInteger(o.quantity))) return fail("Bad quantity.");
+    if (!(o.price > 0)) return fail("Bad price.");
+    if (o.order_type === "SL" && !(o.trigger_price > 0)) return fail("Stop order needs a trigger price.");
+    if (!/^[A-Z0-9&\-]{1,20}$/.test(o.tradingsymbol)) return fail("Bad symbol.");
+    o.variety = "regular"; o.validity = "DAY"; o.readonly = true;
+  }
+
+  const rows = orders.map(o => {
+    const value = (o.quantity * o.price).toLocaleString("en-IN", {maximumFractionDigits: 2});
+    return '<div class="order"><table>' +
+      '<tr><td>Stock</td><td><b>' + esc(o.tradingsymbol) + '</b> (NSE)</td></tr>' +
+      '<tr><td>Action</td><td><b>' + esc(o.transaction_type) + '</b> ' + esc(o.quantity) + ' shares, ' +
+      (o.order_type === "SL" ? 'stop-loss (trigger ₹' + esc(o.trigger_price) + ', limit ₹' + esc(o.price) + ')' : 'limit ₹' + esc(o.price)) + '</td></tr>' +
+      '<tr><td>Product</td><td>CNC (cash, no margin)</td></tr>' +
+      '<tr><td>Value</td><td>≈ ₹' + value + '</td></tr></table></div>';
+  }).join("");
+
+  const mins = Math.max(0, Math.round((exp - Date.now() / 1000) / 60));
+  app.innerHTML =
+    '<h1>Approved order</h1><div class="id">Ticket ' + esc(id) + ' · link valid ' + mins + ' more min</div>' + rows +
+    '<form id="f" method="post" action="https://kite.zerodha.com/connect/basket">' +
+    '<input type="hidden" name="api_key"><input type="hidden" name="data"></form>' +
+    '<button id="go">Open in Kite and confirm</button>' +
+    '<p class="note">Zerodha opens with this order filled in and locked. Log in if asked, check it, then confirm there. ' +
+    'Only you can place it. Tap once — if you are unsure whether it went through, check Kite → Orders before tapping again.</p>';
+
+  const f = document.getElementById("f");
+  f.api_key.value = key;
+  f.data.value = JSON.stringify(orders);
+  document.getElementById("go").addEventListener("click", function () {
+    this.disabled = true; this.textContent = "Opening Kite…";
+    f.submit();
+  });
+})();
+</script>
+</body>
+</html>
