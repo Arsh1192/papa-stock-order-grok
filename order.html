@@ -40,6 +40,14 @@
   const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const p = new URLSearchParams(location.hash.slice(1));
   const q = new URLSearchParams(location.search);
+  // Public Kite app key (api_key is public by design; the API secret never lives here).
+  // Kept in the page so MB's links don't need to carry it (Grok's chat masks it).
+  const APP_KEY = "9ugzq8bgifzy7pbu";
+
+  if (q.has("login") || location.hash === "#login") {   // daily Kite login link: order.html?login
+    location.replace("https://kite.zerodha.com/connect/login?v=3&api_key=" + APP_KEY);
+    return;
+  }
 
   if (q.get("request_token") && (q.get("action") || "login") === "login" && q.get("type") !== "basket") {
     // Daily Kite login (read-only live prices for MB). Show the one-day code to send to MB.
@@ -66,7 +74,7 @@
 
   function fail(msg) { app.innerHTML = '<h1>Order link problem</h1><p class="err">' + esc(msg) + '</p><p class="note">Ask MB for a fresh link. Nothing was sent to Zerodha.</p>'; }
 
-  const key = p.get("k"), id = p.get("id"), exp = Number(p.get("exp") || 0), b = p.get("b");
+  const key = p.get("k") || APP_KEY, id = p.get("id"), exp = Number(p.get("exp") || 0), b = p.get("b");
   if (!key || !id || !b) return fail("This link is incomplete.");
   if (!/^[A-Za-z0-9]{6,40}$/.test(key)) return fail("Bad Kite app key in the link.");
   if (!exp || Date.now() / 1000 > exp) return fail("This link has expired.");
